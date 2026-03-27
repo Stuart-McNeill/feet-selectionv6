@@ -8,35 +8,18 @@
         :root {
             --primary: #00f2ff;
             --bg: #0a0a0c;
-            --panel-bg: rgba(25, 25, 30, 0.8);
-            --border: rgba(255, 255, 255, 0.1);
         }
-
         body { 
             margin: 0; 
             overflow: hidden; 
-            font-family: 'Inter', -apple-system, sans-serif; 
             background: var(--bg); 
-            color: white; 
-            touch-action: none;
+            touch-action: none; /* Prevents browser pull-to-refresh */
         }
-
-        /* Hides the web UI for Expo App */
+        /* Hide local UI for Expo */
         #ui-layer { display: none !important; }
-
-        #status { font-family: monospace; font-size: 10px; color: #555; margin-top: 10px; text-transform: uppercase; }
-        #coords { font-weight: 500; color: var(--primary); margin-top: 4px; font-size: 14px; }
-        ::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
-
-<div id="ui-layer">
-    <div class="panel">
-        <div id="status">System Ready</div>
-        <div id="coords">Region: None</div>
-    </div>
-</div>
 
 <script type="importmap">
     {
@@ -315,7 +298,7 @@ function init() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    // V4 Lighting
+    // V4 Lighting Setup
     scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 3.0));
     const sun = new THREE.DirectionalLight(0xffffff, 2.0);
     sun.position.set(5, 5, 5);
@@ -323,19 +306,18 @@ function init() {
 
     scene.add(footGroup);
     scene.add(markerGroup);
-    
     regionGroup.visible = false; 
     scene.add(regionGroup);
 
     PRESET_REGIONS.forEach(data => addRegion(data.name, data.pos, data.rot, data.scale));
 
-    window.addEventListener("resize", onResize);
-    
-    // Unified Input Listener for Desktop and Mobile
+    // MOBILE INPUT FIX:
     const handleInput = (e) => {
         if (!isLoaded || mode !== "draw") return;
         
-        // Handle touch vs mouse
+        // Prevent rotation logic from stealing the tap
+        e.preventDefault();
+
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
@@ -349,6 +331,7 @@ function init() {
     renderer.domElement.addEventListener("mousedown", handleInput);
     renderer.domElement.addEventListener("touchstart", handleInput, { passive: false });
     
+    window.addEventListener("resize", onResize);
     loadFoot();
     animate();
 }
@@ -381,7 +364,7 @@ function performRaycast() {
         const cleanName = region.replace(/Left foot - |Right foot - /g, "");
         markerLogs.push({ region, x: pos.x.toFixed(3), y: pos.y.toFixed(3), z: pos.z.toFixed(3) });
         
-        // Post back to Expo App
+        // Signal back to Expo App
         if (window.ReactNativeWebView) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
                 action: 'MARKER_ADDED',
@@ -432,7 +415,8 @@ function loadFoot() {
 
 function setMode(m) {
     mode = m;
-    controls.enableRotate = (mode === "rotate");
+    // CRITICAL: Disable controls so they don't block the tap
+    controls.enabled = (mode === "rotate");
 }
 
 function addRegion(name, pos, rot, scale) {
@@ -444,7 +428,7 @@ function addRegion(name, pos, rot, scale) {
     regionGroup.add(mesh);
 }
 
-// --- EXPO BRIDGE COMMANDS ---
+// --- EXPO BRIDGE ---
 window.handleMobileCommand = (json) => {
     const data = JSON.parse(json);
     if (data.action === 'SELECT') { currentFoot = data.side; loadFoot(); }
