@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>3D Foot Analysis</title>
     <style>
         :root {
@@ -18,9 +18,10 @@
             font-family: 'Inter', -apple-system, sans-serif; 
             background: var(--bg); 
             color: white; 
+            touch-action: none;
         }
 
-        /* Hides the web UI so only the 3D model shows in the Expo App */
+        /* Hides the web UI for Expo App */
         #ui-layer { display: none !important; }
 
         #status { font-family: monospace; font-size: 10px; color: #555; margin-top: 10px; text-transform: uppercase; }
@@ -314,6 +315,7 @@ function init() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
+    // V4 Lighting
     scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 3.0));
     const sun = new THREE.DirectionalLight(0xffffff, 2.0);
     sun.position.set(5, 5, 5);
@@ -328,82 +330,33 @@ function init() {
     PRESET_REGIONS.forEach(data => addRegion(data.name, data.pos, data.rot, data.scale));
 
     window.addEventListener("resize", onResize);
-    renderer.domElement.addEventListener("mousedown", onMouseDown);
-    renderer.domElement.addEventListener("touchstart", (e) => {
-        onMouseDown(e.touches[0]);
-    });
+    
+    // Unified Input Listener for Desktop and Mobile
+    const handleInput = (e) => {
+        if (!isLoaded || mode !== "draw") return;
+        
+        // Handle touch vs mouse
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        
+        performRaycast();
+    };
+
+    renderer.domElement.addEventListener("mousedown", handleInput);
+    renderer.domElement.addEventListener("touchstart", handleInput, { passive: false });
     
     loadFoot();
     animate();
 }
 
-function loadFoot() {
-    isLoaded = false;
-    document.getElementById("status").textContent = "Synchronizing...";
-    footGroup.clear();
-    markerGroup.clear();
-    markerLogs = [];
-
-    new GLTFLoader().load(urls[currentFoot], (gltf) => {
-        const model = gltf.scene;
-        model.traverse(c => { 
-            if(c.isMesh) {
-                c.material = new THREE.MeshStandardMaterial({ 
-                    color: 0xcccccc, 
-                    roughness: 0.4, 
-                    metalness: 0.2 
-                }); 
-            }
-        });
-        
-        const box = new THREE.Box3().setFromObject(model);
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-
-        model.position.x = -center.x;
-        model.position.y = -box.min.y; 
-        model.position.z = -center.z;
-
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const scaleFactor = 1.0 / maxDim;
-        model.scale.setScalar(scaleFactor);
-        model.position.multiplyScalar(scaleFactor);
-
-        footGroup.add(model);
-        camera.position.set(0, 1.2, 2.5);
-        controls.target.set(0, 0.4, 0);
-        
-        document.getElementById("status").textContent = "System Active";
-        isLoaded = true;
-    });
-}
-
-function setMode(m) {
-    mode = m;
-    controls.enableRotate = (mode === "rotate");
-}
-
-function addRegion(name, pos, rot, scale) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
-    mesh.position.set(...pos);
-    mesh.rotation.set(...rot);
-    mesh.scale.set(...scale);
-    mesh.userData.name = name;
-    regionGroup.add(mesh);
-}
-
-function onMouseDown(e) {
-    if (!isLoaded || mode !== "draw") return;
-    
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    
+function performRaycast() {
     raycaster.setFromCamera(mouse, camera);
-
     const hits = raycaster.intersectObjects(footGroup.children, true);
+    
     if (hits.length > 0) {
         const pos = hits[0].point;
         let region = "External Surface";
@@ -427,9 +380,8 @@ function onMouseDown(e) {
         
         const cleanName = region.replace(/Left foot - |Right foot - /g, "");
         markerLogs.push({ region, x: pos.x.toFixed(3), y: pos.y.toFixed(3), z: pos.z.toFixed(3) });
-        document.getElementById("coords").textContent = cleanName;
-
-        // EXPO BRIDGE: Send region to Mobile App
+        
+        // Post back to Expo App
         if (window.ReactNativeWebView) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
                 action: 'MARKER_ADDED',
@@ -440,7 +392,59 @@ function onMouseDown(e) {
     }
 }
 
-// --- EXPO BRIDGE: Incoming Commands ---
+function loadFoot() {
+    isLoaded = false;
+    footGroup.clear();
+    markerGroup.clear();
+    markerLogs = [];
+
+    new GLTFLoader().load(urls[currentFoot], (gltf) => {
+        const model = gltf.scene;
+        model.traverse(c => { 
+            if(c.isMesh) {
+                c.material = new THREE.MeshStandardMaterial({ 
+                    color: 0xcccccc, roughness: 0.4, metalness: 0.2 
+                }); 
+            }
+        });
+        
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+
+        model.position.x = -center.x;
+        model.position.y = -box.min.y; 
+        model.position.z = -center.z;
+
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scaleFactor = 1.0 / maxDim;
+        model.scale.setScalar(scaleFactor);
+        model.position.multiplyScalar(scaleFactor);
+
+        footGroup.add(model);
+        camera.position.set(0, 1.2, 2.5);
+        controls.target.set(0, 0.4, 0);
+        isLoaded = true;
+    });
+}
+
+function setMode(m) {
+    mode = m;
+    controls.enableRotate = (mode === "rotate");
+}
+
+function addRegion(name, pos, rot, scale) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+    mesh.position.set(...pos);
+    mesh.rotation.set(...rot);
+    mesh.scale.set(...scale);
+    mesh.userData.name = name;
+    regionGroup.add(mesh);
+}
+
+// --- EXPO BRIDGE COMMANDS ---
 window.handleMobileCommand = (json) => {
     const data = JSON.parse(json);
     if (data.action === 'SELECT') { currentFoot = data.side; loadFoot(); }
