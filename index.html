@@ -3,20 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Foot Analysis</title>
+    <title>3D Foot Analysis V4</title>
     <style>
-        :root {
-            --primary: #00f2ff;
-            --bg: #0a0a0c;
-        }
-        body { 
-            margin: 0; 
-            overflow: hidden; 
-            background: var(--bg); 
-            touch-action: none; /* Prevents browser pull-to-refresh */
-        }
-        /* Hide local UI for Expo */
-        #ui-layer { display: none !important; }
+        body { margin: 0; overflow: hidden; background: #0a0a0c; touch-action: none; }
+        #ui-layer { display: none !important; } /* Hide internal UI */
     </style>
 </head>
 <body>
@@ -272,12 +262,10 @@ const urls = {
 let scene, camera, renderer, controls;
 let raycaster = new THREE.Raycaster();
 let mouse = new THREE.Vector2();
-
 let currentFoot = "right";
 let footGroup = new THREE.Group();
 let markerGroup = new THREE.Group();
 let regionGroup = new THREE.Group(); 
-
 let isLoaded = false;
 let mode = "rotate"; 
 let markerLogs = [];
@@ -287,8 +275,8 @@ init();
 function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a0c);
-
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
+    
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -298,7 +286,7 @@ function init() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    // V4 Lighting Setup
+    // V4 Lighting
     scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 3.0));
     const sun = new THREE.DirectionalLight(0xffffff, 2.0);
     sun.position.set(5, 5, 5);
@@ -311,13 +299,10 @@ function init() {
 
     PRESET_REGIONS.forEach(data => addRegion(data.name, data.pos, data.rot, data.scale));
 
-    // MOBILE INPUT FIX:
+    // Handle Input (Mobile & Desktop)
     const handleInput = (e) => {
-        if (!isLoaded || mode !== "draw") return;
+        if (!isLoaded || mode !== "mark") return; // Matches your Expo 'mark' string
         
-        // Prevent rotation logic from stealing the tap
-        e.preventDefault();
-
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
@@ -364,12 +349,11 @@ function performRaycast() {
         const cleanName = region.replace(/Left foot - |Right foot - /g, "");
         markerLogs.push({ region, x: pos.x.toFixed(3), y: pos.y.toFixed(3), z: pos.z.toFixed(3) });
         
-        // Signal back to Expo App
+        // SEND DATA BACK TO EXPO
         if (window.ReactNativeWebView) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
-                action: 'MARKER_ADDED',
-                region: cleanName,
-                count: markerGroup.children.length
+                count: markerGroup.children.length,
+                region: cleanName
             }));
         }
     }
@@ -413,12 +397,6 @@ function loadFoot() {
     });
 }
 
-function setMode(m) {
-    mode = m;
-    // CRITICAL: Disable controls so they don't block the tap
-    controls.enabled = (mode === "rotate");
-}
-
 function addRegion(name, pos, rot, scale) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
     mesh.position.set(...pos);
@@ -428,11 +406,14 @@ function addRegion(name, pos, rot, scale) {
     regionGroup.add(mesh);
 }
 
-// --- EXPO BRIDGE ---
+// --- EXPO BRIDGE COMMANDS ---
 window.handleMobileCommand = (json) => {
     const data = JSON.parse(json);
     if (data.action === 'SELECT') { currentFoot = data.side; loadFoot(); }
-    if (data.action === 'SET_MODE') setMode(data.mode);
+    if (data.action === 'SET_MODE') {
+        mode = data.mode;
+        controls.enabled = (mode === "rotate");
+    }
     if (data.action === 'UNDO') {
         if (markerGroup.children.length > 0) {
             markerGroup.remove(markerGroup.children[markerGroup.children.length - 1]);
